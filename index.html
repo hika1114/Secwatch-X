@@ -60,6 +60,10 @@ main{padding-block:12px 40px;display:flex;flex-direction:column;gap:10px}
 mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px}
 .tags{display:flex;flex-wrap:wrap;gap:6px}
 .tag{font:11px var(--font-mono);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--muted)}
+.post.star{border-left:4px solid var(--accent)}
+.post.star.crit{border-left-color:var(--crit)}
+.tag.star{border-color:var(--accent);color:var(--accent);font-weight:600}
+.chip .s{font-size:11px}
 .tag.crit{border-color:var(--crit);color:var(--crit);font-weight:600}
 .cve{font:12px var(--font-mono);color:var(--accent);text-decoration:none;border:1px solid var(--accent);border-radius:4px;padding:1px 6px}
 .open{font-size:12px;color:var(--accent)}
@@ -78,6 +82,9 @@ mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px}
    <select id="lang" aria-label="言語">
     <option value="all">全言語</option><option value="ja">日本語</option><option value="en">英語</option>
    </select>
+   <select id="view" aria-label="表示">
+    <option value="all">すべて</option><option value="star">注目のみ</option>
+   </select>
    <button id="toggle" class="primary">接続</button>
    <button id="clear">クリア</button>
   </div>
@@ -92,6 +99,9 @@ mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px}
    <div class="lbl">拾うワード</div>
    <div class="chips" id="kwList"></div>
    <form class="add" id="kwForm"><input id="kwIn" placeholder="追加（例: Fortinet）"><button>追加</button></form>
+   <div class="lbl">注目アカウント（キーワードなしでも表示・✓確認済 ✗見つからず）</div>
+   <div class="chips" id="acctList"></div>
+   <form class="add" id="acctForm"><input id="acctIn" placeholder="ハンドル（例: doublepulsar.com）"><button>追加</button></form>
    <div class="lbl">除外ワード</div>
    <div class="chips" id="exList"></div>
    <form class="add" id="exForm"><input id="exIn" placeholder="除外（例: airdrop）"><button>追加</button></form>
@@ -107,15 +117,16 @@ mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px}
 const HOSTS=["jetstream2.us-east.bsky.network","jetstream1.us-east.bsky.network","jetstream1.us-west.bsky.network","jetstream2.us-west.bsky.network"];
 const DEF={
  kw:["CVE-","0day","zero-day","ゼロデイ","exploit","RCE","ransomware","ランサムウェア","脆弱性","malware","マルウェア","phishing","フィッシング","APT","KEV","infosec","threat intel","不正アクセス","情報漏洩","サイバー攻撃","DFIR","IOC"],
+ acct:["doublepulsar.com","troyhunt.com","malwaretech.com","krebsonsecurity.com","swiftonsecurity.com","bleepingcomputer.com","therecord.media","404media.co","risky.biz"],
  ex:["airdrop","giveaway","nsfw"],
  cr:["actively exploited","exploited in the wild","in the wild","CVSS 9","CVSS 10","緊急","悪用が確認","悪用を確認","悪用されて"]
 };
 const MAX_POSTS=200;
 // CRITICAL既定値を変更したためキーを版上げ（古い保存値を引き継がない）
-const KEY={kw:"sw_kw",ex:"sw_ex",cr:"sw_cr_v2"};
+const KEY={kw:"sw_kw",ex:"sw_ex",cr:"sw_cr_v2",acct:"sw_acct"};
 const load=k=>{try{const v=JSON.parse(localStorage.getItem(KEY[k]));return Array.isArray(v)?v:DEF[k].slice()}catch(e){return DEF[k].slice()}};
 const save=k=>{try{localStorage.setItem(KEY[k],JSON.stringify(S[k]))}catch(e){}};
-const S={kw:load("kw"),ex:load("ex"),cr:load("cr")};
+const S={kw:load("kw"),ex:load("ex"),cr:load("cr"),acct:load("acct")};
 let RX={};
 const esc=s=>s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
@@ -126,22 +137,32 @@ function mk(t){
  // APT/RCE等の短い大文字略語は大文字小文字を区別（"sudo apt"を拾わない）
  return new RegExp(pre+"("+reEsc(t)+")"+post,/^[A-Z]{2,5}$/.test(t)?"g":"gi");
 }
-function build(k){RX[k]=S[k].map(mk)}
+const acctDid=new Map();let watched=new Set();
+function refreshWatched(){watched=new Set(S.acct.map(h=>acctDid.get(h)).filter(Boolean))}
+async function resolveAcct(h){
+ if(acctDid.has(h))return;acctDid.set(h,undefined);
+ try{const r=await fetch("https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor="+encodeURIComponent(h));
+  if(r.ok){const j=await r.json();acctDid.set(h,j.did);handles.set(j.did,j.handle)}else acctDid.set(h,false)}
+ catch(e){acctDid.delete(h)}
+ refreshWatched();renderChips("acct");
+}
+function build(k){if(k==="acct"){S.acct.forEach(resolveAcct);refreshWatched();return}RX[k]=S[k].map(mk)}
 function find(k,text){const out=[];for(const re of RX[k]){re.lastIndex=0;for(const m of text.matchAll(re))out.push(m[1])}return out}
-["kw","ex","cr"].forEach(build);
+
 
 const $=id=>document.getElementById(id);
 function renderChips(k){
  const el=$(k+"List");el.innerHTML="";
  S[k].forEach((t,i)=>{
   const c=document.createElement("span");c.className="chip"+(k==="ex"?" ex":"");
-  c.textContent=t;const b=document.createElement("button");b.textContent="×";b.setAttribute("aria-label",t+"を削除");
+  if(k==="acct"){const st=acctDid.get(t);const i=document.createElement("span");i.className="s";i.textContent=st?"✓ ":st===false?"✗ ":"… ";c.append(i)}
+  c.append(t);const b=document.createElement("button");b.textContent="×";b.setAttribute("aria-label",t+"を削除");
   b.onclick=()=>{S[k].splice(i,1);save(k);build(k);renderChips(k)};c.append(b);el.append(c);
  });
 }
-["kw","ex","cr"].forEach(k=>{
+["kw","ex","cr","acct"].forEach(k=>{
  renderChips(k);
- $(k+"Form").onsubmit=e=>{e.preventDefault();const v=$(k+"In").value.trim();if(v&&!S[k].includes(v)){S[k].push(v);save(k);build(k);renderChips(k)}$(k+"In").value=""};
+ $(k+"Form").onsubmit=e=>{e.preventDefault();let v=$(k+"In").value.trim();if(k==="acct")v=v.replace(/^@/,"").toLowerCase();if(v&&!S[k].includes(v)){S[k].push(v);save(k);build(k);renderChips(k)}$(k+"In").value=""};
 });
 
 // stats
@@ -155,6 +176,7 @@ setInterval(tick,1000);
 
 // handle resolution (best effort)
 const handles=new Map();
+["kw","ex","cr","acct"].forEach(build);
 async function handleOf(did,el){
  if(handles.has(did)){const h=handles.get(did);if(h)el.textContent="@"+h;return}
  handles.set(did,null);
@@ -175,18 +197,20 @@ function onPost(ev){
  if(!text)return;
  const lang=$("lang").value;
  if(lang!=="all"&&!(rec.langs||[]).includes(lang))return;
- const kws=find("kw",text);if(!kws.length)return;
- if(find("ex",text).length)return;
+ const star=watched.has(ev.did);
+ if($("view").value==="star"&&!star)return;
+ const kws=find("kw",text);if(!kws.length&&!star)return;
+ if(!star&&find("ex",text).length)return;
  const crl=find("cr",text);const crs=crl.length?crl:null;
  hit++;hitTimes.push(Date.now());if(crs)crit++;
  const cves=[...new Set((text.match(/CVE-\d{4}-\d{4,7}/gi)||[]).map(s=>s.toUpperCase()))];
  const url=`https://bsky.app/profile/${ev.did}/post/${ev.commit.rkey}`;
  const time=new Date(ev.time_us/1000).toLocaleTimeString("ja-JP");
- const card=document.createElement("article");card.className="post new"+(crs?" crit":"");
+ const card=document.createElement("article");card.className="post new"+(star?" star":"")+(crs?" crit":"");
  const tagSet=[...new Set(kws.map(s=>s.toLowerCase()))];
  card.innerHTML=`<div class="meta"><span>${time}</span><span class="who">${esc(ev.did.slice(0,20))}…</span>${(rec.langs||[]).length?`<span>${esc(rec.langs.join(","))}</span>`:""}</div>
  <div class="txt">${highlight(text,kws.concat(crl))}</div>
- <div class="tags">${crs?`<span class="tag crit">CRITICAL</span>`:""}${tagSet.map(t=>`<span class="tag">${esc(t)}</span>`).join("")}
+ <div class="tags">${star?`<span class="tag star">★ 注目</span>`:""}${crs?`<span class="tag crit">CRITICAL</span>`:""}${tagSet.map(t=>`<span class="tag">${esc(t)}</span>`).join("")}
  ${cves.map(c=>`<a class="cve" target="_blank" rel="noopener" href="https://nvd.nist.gov/vuln/detail/${c}">${c}</a>`).join("")}
  <a class="open" target="_blank" rel="noopener" href="${url}">投稿を開く →</a></div>`;
  handleOf(ev.did,card.querySelector(".who"));
