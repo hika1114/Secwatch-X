@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>SecWatch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+JP:wght@400;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: sticky console bar (status + controls) over a single-column live feed */
+:root{
+  --bg:#eef1f4;--panel:#ffffff;--fg:#17202b;--muted:#5d6b7a;--line:#d5dce3;
+  --accent:#1f5fbf;--accent-soft:#e3ecfa;--crit:#c0392b;--crit-soft:#fbe9e7;--ok:#1e8a5a;--warn:#b7791f;
+  --mark:#fff1a8;
+  --font-body:"IBM Plex Sans JP",system-ui,-apple-system,"Hiragino Sans",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#0f141b;--panel:#161d26;--fg:#dbe3ec;--muted:#8796a8;--line:#263241;
+  --accent:#6ea8ff;--accent-soft:#1a2a42;--crit:#ff7a6b;--crit-soft:#3a1d1a;--ok:#4cc38a;--warn:#e0a84a;--mark:#5a4b12;color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f141b;--panel:#161d26;--fg:#dbe3ec;--muted:#8796a8;--line:#263241;
+  --accent:#6ea8ff;--accent-soft:#1a2a42;--crit:#ff7a6b;--crit-soft:#3a1d1a;--ok:#4cc38a;--warn:#e0a84a;--mark:#5a4b12;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--fg);font:14px/1.6 var(--font-body)}
+.wrap{max-width:760px;margin:0 auto;padding-inline:max(16px,env(safe-area-inset-left,0px)) max(16px,env(safe-area-inset-right,0px))}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding-block:12px}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+h1{font:600 18px/1 var(--font-mono);margin:0;letter-spacing:.02em}
+.status{display:inline-flex;align-items:center;gap:6px;font:12px var(--font-mono);color:var(--muted)}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--muted)}
+.dot.live{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
+.dot.err{background:var(--warn)}
+.spacer{flex:1}
+button,select,input{font:inherit;color:var(--fg)}
+button{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 12px;cursor:pointer}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--panel);font-weight:600}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+select{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+.stats{display:flex;gap:16px;margin-top:10px;font:12px var(--font-mono);color:var(--muted);font-variant-numeric:tabular-nums;flex-wrap:wrap}
+.stats b{color:var(--fg);font-weight:600}
+.stats .spike b{color:var(--crit)}
+details{margin-top:10px;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+summary{cursor:pointer;font-weight:600}
+.lbl{font-size:12px;color:var(--muted);letter-spacing:.04em;margin:10px 0 4px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{display:inline-flex;align-items:center;gap:4px;font:12px var(--font-mono);background:var(--accent-soft);border-radius:4px;padding:2px 4px 2px 8px}
+.chip.ex{background:var(--crit-soft)}
+.chip button{border:0;background:none;padding:0 4px;color:var(--muted);line-height:1}
+.add{display:flex;gap:6px;margin-top:6px}
+.add input{flex:1;min-width:0;background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:5px 8px}
+main{padding-block:12px 40px;display:flex;flex-direction:column;gap:10px}
+.empty{color:var(--muted);text-align:center;padding:40px 0}
+.post{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:10px 12px;min-width:0}
+.post.crit{border-left:4px solid var(--crit);background:linear-gradient(90deg,var(--crit-soft),var(--panel) 40%)}
+.meta{display:flex;flex-wrap:wrap;gap:8px;font:12px var(--font-mono);color:var(--muted)}
+.meta a{color:var(--muted)}
+.txt{margin:6px 0;white-space:pre-wrap;overflow-wrap:anywhere}
+mark{background:var(--mark);color:inherit;border-radius:2px;padding:0 1px}
+.tags{display:flex;flex-wrap:wrap;gap:6px}
+.tag{font:11px var(--font-mono);border:1px solid var(--line);border-radius:4px;padding:1px 6px;color:var(--muted)}
+.tag.crit{border-color:var(--crit);color:var(--crit);font-weight:600}
+.cve{font:12px var(--font-mono);color:var(--accent);text-decoration:none;border:1px solid var(--accent);border-radius:4px;padding:1px 6px}
+.open{font-size:12px;color:var(--accent)}
+@keyframes flash{from{background:var(--accent-soft)}}
+.post.new{animation:flash 1.2s ease-out}
+@media (prefers-reduced-motion:reduce){.post.new{animation:none}}
+</style>
+</head>
+<body>
+<header>
+ <div class="wrap">
+  <div class="row">
+   <h1>SecWatch</h1>
+   <span class="status"><span class="dot" id="dot"></span><span id="st">停止中</span></span>
+   <span class="spacer"></span>
+   <select id="lang" aria-label="言語">
+    <option value="all">全言語</option><option value="ja">日本語</option><option value="en">英語</option>
+   </select>
+   <button id="toggle" class="primary">接続</button>
+   <button id="clear">クリア</button>
+  </div>
+  <div class="stats">
+   <span>走査 <b id="sScan">0</b></span>
+   <span>ヒット <b id="sHit">0</b></span>
+   <span id="rateBox">直近1分 <b id="sRate">0</b>件</span>
+   <span>CRIT <b id="sCrit">0</b></span>
+  </div>
+  <details>
+   <summary>監視キーワード</summary>
+   <div class="lbl">拾うワード</div>
+   <div class="chips" id="kwList"></div>
+   <form class="add" id="kwForm"><input id="kwIn" placeholder="追加（例: Fortinet）"><button>追加</button></form>
+   <div class="lbl">除外ワード</div>
+   <div class="chips" id="exList"></div>
+   <form class="add" id="exForm"><input id="exIn" placeholder="除外（例: airdrop）"><button>追加</button></form>
+   <div class="lbl">CRITICAL扱い（赤表示）</div>
+   <div class="chips" id="crList"></div>
+   <form class="add" id="crForm"><input id="crIn" placeholder="追加（例: CVSS 10）"><button>追加</button></form>
+  </details>
+ </div>
+</header>
+<div class="wrap"><main id="feed"><div class="empty" id="empty">「接続」を押すとBlueskyの投稿からセキュリティ関連だけが流れてきますわ</div></main></div>
+
+<script>
+const HOSTS=["jetstream2.us-east.bsky.network","jetstream1.us-east.bsky.network","jetstream1.us-west.bsky.network","jetstream2.us-west.bsky.network"];
+const DEF={
+ kw:["CVE-","0day","zero-day","ゼロデイ","exploit","RCE","ransomware","ランサムウェア","脆弱性","malware","マルウェア","phishing","フィッシング","APT","KEV","infosec","threat intel","不正アクセス","情報漏洩","サイバー攻撃","DFIR","IOC"],
+ ex:["airdrop","giveaway","nsfw"],
+ cr:["critical","actively exploited","in the wild","zero-day","0day","ゼロデイ","悪用","緊急","CVSS 9","CVSS 10","KEV"]
+};
+const MAX_POSTS=200;
+const load=k=>{try{const v=JSON.parse(localStorage.getItem("sw_"+k));return Array.isArray(v)?v:DEF[k].slice()}catch(e){return DEF[k].slice()}};
+const save=k=>{try{localStorage.setItem("sw_"+k,JSON.stringify(S[k]))}catch(e){}};
+const S={kw:load("kw"),ex:load("ex"),cr:load("cr")};
+let RX={};
+const esc=s=>s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const reEsc=s=>s.replace(/[.*+?^${}()|[\]\\]/g,"\\$&");
+// 後読み(?<!)は古いSafariで構文エラーになるため使わない
+function mk(t){
+ const a=/[A-Za-z0-9]/;let pre="",post="";
+ if(/^[\x00-\x7F]+$/.test(t)){ if(a.test(t[0]))pre="(?:^|[^A-Za-z0-9])"; if(a.test(t[t.length-1]))post="(?![A-Za-z])"; }
+ // APT/RCE等の短い大文字略語は大文字小文字を区別（"sudo apt"を拾わない）
+ return new RegExp(pre+"("+reEsc(t)+")"+post,/^[A-Z]{2,5}$/.test(t)?"g":"gi");
+}
+function build(k){RX[k]=S[k].map(mk)}
+function find(k,text){const out=[];for(const re of RX[k]){re.lastIndex=0;for(const m of text.matchAll(re))out.push(m[1])}return out}
+["kw","ex","cr"].forEach(build);
+
+const $=id=>document.getElementById(id);
+function renderChips(k){
+ const el=$(k+"List");el.innerHTML="";
+ S[k].forEach((t,i)=>{
+  const c=document.createElement("span");c.className="chip"+(k==="ex"?" ex":"");
+  c.textContent=t;const b=document.createElement("button");b.textContent="×";b.setAttribute("aria-label",t+"を削除");
+  b.onclick=()=>{S[k].splice(i,1);save(k);build(k);renderChips(k)};c.append(b);el.append(c);
+ });
+}
+["kw","ex","cr"].forEach(k=>{
+ renderChips(k);
+ $(k+"Form").onsubmit=e=>{e.preventDefault();const v=$(k+"In").value.trim();if(v&&!S[k].includes(v)){S[k].push(v);save(k);build(k);renderChips(k)}$(k+"In").value=""};
+});
+
+// stats
+let scan=0,hit=0,crit=0,hitTimes=[];
+function tick(){
+ const now=Date.now();hitTimes=hitTimes.filter(t=>now-t<60000);
+ $("sScan").textContent=scan.toLocaleString();$("sHit").textContent=hit;$("sCrit").textContent=crit;
+ $("sRate").textContent=hitTimes.length;$("rateBox").classList.toggle("spike",hitTimes.length>=15);
+}
+setInterval(tick,1000);
+
+// handle resolution (best effort)
+const handles=new Map();
+async function handleOf(did,el){
+ if(handles.has(did)){const h=handles.get(did);if(h)el.textContent="@"+h;return}
+ handles.set(did,null);
+ try{const r=await fetch("https://public.api.bsky.app/xrpc/app.bsky.actor.getProfile?actor="+encodeURIComponent(did));
+  if(r.ok){const j=await r.json();handles.set(did,j.handle);el.textContent="@"+j.handle}}catch(e){}
+}
+
+function highlight(text,found){
+ let html=esc(text);
+ const terms=[...new Set(found)].sort((a,b)=>b.length-a.length);
+ if(terms.length){const r=new RegExp(terms.map(t=>reEsc(esc(t))).join("|"),"gi");html=html.replace(r,m=>"<mark>"+m+"</mark>")}
+ return html;
+}
+
+function onPost(ev){
+ const rec=ev.commit.record;const text=rec.text||"";
+ scan++;
+ if(!text)return;
+ const lang=$("lang").value;
+ if(lang!=="all"&&!(rec.langs||[]).includes(lang))return;
+ const kws=find("kw",text);if(!kws.length)return;
+ if(find("ex",text).length)return;
+ const crl=find("cr",text);const crs=crl.length?crl:null;
+ hit++;hitTimes.push(Date.now());if(crs)crit++;
+ const cves=[...new Set((text.match(/CVE-\d{4}-\d{4,7}/gi)||[]).map(s=>s.toUpperCase()))];
+ const url=`https://bsky.app/profile/${ev.did}/post/${ev.commit.rkey}`;
+ const time=new Date(ev.time_us/1000).toLocaleTimeString("ja-JP");
+ const card=document.createElement("article");card.className="post new"+(crs?" crit":"");
+ const tagSet=[...new Set(kws.map(s=>s.toLowerCase()))];
+ card.innerHTML=`<div class="meta"><span>${time}</span><span class="who">${esc(ev.did.slice(0,20))}…</span>${(rec.langs||[]).length?`<span>${esc(rec.langs.join(","))}</span>`:""}</div>
+ <div class="txt">${highlight(text,kws.concat(crl))}</div>
+ <div class="tags">${crs?`<span class="tag crit">CRITICAL</span>`:""}${tagSet.map(t=>`<span class="tag">${esc(t)}</span>`).join("")}
+ ${cves.map(c=>`<a class="cve" target="_blank" rel="noopener" href="https://nvd.nist.gov/vuln/detail/${c}">${c}</a>`).join("")}
+ <a class="open" target="_blank" rel="noopener" href="${url}">投稿を開く →</a></div>`;
+ handleOf(ev.did,card.querySelector(".who"));
+ $("empty").hidden=true;
+ const feed=$("feed");feed.insertBefore(card,$("empty").nextSibling);
+ while(feed.children.length>MAX_POSTS+1)feed.lastChild.remove();
+}
+
+// connection
+let ws=null,want=false,hostIdx=0,retry=0,everOpened=false;
+function setStatus(t,c){$("st").textContent=t;$("dot").className="dot "+(c||"")}
+const BLOCKED="外部接続が遮断されています。SafariやChromeで直接開いてください";
+function connect(){
+ const host=HOSTS[hostIdx%HOSTS.length];
+ setStatus("接続中… "+host.split(".")[0]);
+ try{ws=new WebSocket(`wss://${host}/subscribe?wantedCollections=app.bsky.feed.post`)}
+ catch(e){want=false;$("toggle").textContent="接続";setStatus(BLOCKED,"err");return}
+ ws.onopen=()=>{retry=0;everOpened=true;setStatus("LIVE "+host.split(".")[0],"live")};
+ ws.onmessage=m=>{try{const ev=JSON.parse(m.data);if(ev.kind==="commit"&&ev.commit&&ev.commit.operation==="create"&&ev.commit.collection==="app.bsky.feed.post")onPost(ev)}catch(e){}};
+ ws.onclose=()=>{if(!want){setStatus("停止中");return}
+  hostIdx++;retry++;
+  if(!everOpened&&retry>=HOSTS.length){want=false;$("toggle").textContent="接続";setStatus(BLOCKED,"err");return}
+  const wait=Math.min(30000,1000*2**Math.min(retry,5));
+  setStatus(`切断 ${Math.round(wait/1000)}秒後に再接続`,"err");setTimeout(()=>want&&connect(),wait)};
+ ws.onerror=()=>{try{ws.close()}catch(e){}};
+}
+$("toggle").onclick=()=>{
+ want=!want;$("toggle").textContent=want?"一時停止":"接続";
+ if(want)connect();else if(ws){ws.close();ws=null}
+};
+$("clear").onclick=()=>{document.querySelectorAll(".post").forEach(p=>p.remove());$("empty").hidden=false};
+</script>
+</body>
+</html>
