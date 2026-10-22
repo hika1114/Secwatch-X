@@ -108,11 +108,13 @@ const HOSTS=["jetstream2.us-east.bsky.network","jetstream1.us-east.bsky.network"
 const DEF={
  kw:["CVE-","0day","zero-day","ゼロデイ","exploit","RCE","ransomware","ランサムウェア","脆弱性","malware","マルウェア","phishing","フィッシング","APT","KEV","infosec","threat intel","不正アクセス","情報漏洩","サイバー攻撃","DFIR","IOC"],
  ex:["airdrop","giveaway","nsfw"],
- cr:["critical","actively exploited","in the wild","zero-day","0day","ゼロデイ","悪用","緊急","CVSS 9","CVSS 10","KEV"]
+ cr:["actively exploited","exploited in the wild","in the wild","CVSS 9","CVSS 10","緊急","悪用が確認","悪用を確認","悪用されて"]
 };
 const MAX_POSTS=200;
-const load=k=>{try{const v=JSON.parse(localStorage.getItem("sw_"+k));return Array.isArray(v)?v:DEF[k].slice()}catch(e){return DEF[k].slice()}};
-const save=k=>{try{localStorage.setItem("sw_"+k,JSON.stringify(S[k]))}catch(e){}};
+// CRITICAL既定値を変更したためキーを版上げ（古い保存値を引き継がない）
+const KEY={kw:"sw_kw",ex:"sw_ex",cr:"sw_cr_v2"};
+const load=k=>{try{const v=JSON.parse(localStorage.getItem(KEY[k]));return Array.isArray(v)?v:DEF[k].slice()}catch(e){return DEF[k].slice()}};
+const save=k=>{try{localStorage.setItem(KEY[k],JSON.stringify(S[k]))}catch(e){}};
 const S={kw:load("kw"),ex:load("ex"),cr:load("cr")};
 let RX={};
 const esc=s=>s.replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
